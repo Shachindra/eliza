@@ -1,55 +1,56 @@
-# Use a specific Node.js version for better reproducibility
-FROM node:23.3.0-slim AS builder
+# Using Ubuntu as Base Image
+FROM ubuntu:22.04 AS builder
 
-# Install pnpm globally and install necessary build tools
-RUN npm install -g pnpm@9.4.0 && \
-    apt-get update && \
-    apt-get install -y git python3 make g++ && \
+# Install Node.js and other dependencies
+RUN apt-get update && \
+    apt-get install -y curl git python3 make g++ \
+    sqlite3 libsqlite3-dev \
+    ffmpeg libavcodec-extra \
+    ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g pnpm@9.15.1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set Python 3 as the default python
+# Set Python 3 as default
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# Set the working directory
 WORKDIR /app
 
-# Copy package.json and other configuration files
+# Copy package files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc turbo.json ./
 
-# Copy the rest of the application code
+# Copy source code
 COPY agent ./agent
 COPY packages ./packages
 COPY scripts ./scripts
 COPY characters ./characters
 
-# Install dependencies and build the project
+# Install and build
 RUN pnpm install \
     && pnpm build-docker \
     && pnpm prune --prod
 
-# Create a new stage for the final image
-FROM node:23.3.0-slim
+# Create a new stage for the final production image
+FROM ubuntu:22.04
 
-# Install runtime dependencies if needed
-RUN npm install -g pnpm@9.4.0 && \
-    apt-get update && \
-    apt-get install -y git python3 && \
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y curl git python3 make g++ ca-certificates \
+    sqlite3 libsqlite3-dev \
+    ffmpeg libavcodec-extra && \
+    curl -fsSL https://deb.nodesource.com/setup_23.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g pnpm@9.15.1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Set Python 3 as default
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# Copy built artifacts and production dependencies from the builder stage
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/pnpm-workspace.yaml ./
-COPY --from=builder /app/.npmrc ./
-COPY --from=builder /app/turbo.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/agent ./agent
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/characters ./characters
+WORKDIR /app
+COPY --from=builder /app .
 
 # Set the command to run the application
 CMD ["pnpm", "start"]
